@@ -3,9 +3,15 @@ Hei Gemini! Her er dagens tall fra Garmin (2025-12-13).
 
 Helse:
 - Hvilepuls: 50
-- HRV (siste natt): N/A
-- Stress: 32
-- Søvn: 8t 11m
+- Stressnivå: 32
+- Søvnvarighet: 8t 11m
+
+HRV Data:
+Siste natt: 51 ms
+- Ujesnitt (7 dager): 55 ms
+- Baseline: 57-76 ms
+- 5 min maks: 79 ms
+- Status: UNBALANCED
 
 Trening:
 Ingen trening registrert.
