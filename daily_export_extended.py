@@ -3,14 +3,12 @@ import sys
 import datetime
 from pathlib import Path
 from garminconnect import Garmin
-import google.generativeai as genai
 
 # --- 1. KONFIGURASJON ---
 GARMIN_EMAIL = os.getenv("GARMIN_EMAIL")
 GARMIN_PASSWORD = os.getenv("GARMIN_PASSWORD")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Fallback til lokal fil
+# Fallback til lokal fil (config.txt)
 if not GARMIN_EMAIL:
     current_dir = Path(__file__).parent
     config_file = current_dir / 'config.txt'
@@ -24,11 +22,10 @@ if not GARMIN_EMAIL:
                         config[key.strip()] = value.strip().strip('"').strip("'")
             GARMIN_EMAIL = config.get("GARMIN_EMAIL")
             GARMIN_PASSWORD = config.get("GARMIN_PASSWORD")
-            GEMINI_API_KEY = config.get("GEMINI_API_KEY")
         except: pass
 
 if not GARMIN_EMAIL or not GARMIN_PASSWORD:
-    print("Mangler passord.")
+    print("Mangler Garmin brukernavn/passord.")
     sys.exit(1)
 
 # --- 2. HJELPEFUNKSJONER ---
@@ -39,15 +36,6 @@ def format_duration(seconds):
     return f"{h}t {m}m" if h > 0 else f"{m}m"
 
 def main():
-    # Oppsett av Gemini - Endret modellnavn til standard 1.5 flash
-    model = None
-    if GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
-        try:
-            model = genai.GenerativeModel('gemini-flash-latest')
-        except Exception as e:
-            print(f"Kunne ikke konfigurere modell: {e}")
-
     print(f"Logger inn på Garmin...")
     try:
         client = Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
@@ -77,34 +65,29 @@ def main():
     resting_hr = stats.get('restingHeartRate', 'N/A')
     avg_stress = stats.get('averageStressLevel', 'N/A')
     
-    # --- NY HRV LOGIKK (OPPDATERT) ---
-    # Vi lager en strukturert tekst for HRV basert på feltene du fant i loggen
+    # --- HRV LOGIKK ---
     hrv_details = "N/A"
-    
     hrv_summary = hrv_data.get('hrvSummary', {})
     
     if hrv_summary:
-        # Henter ut spesifikke felter basert på din logg
         last_night = hrv_summary.get('lastNightAvg', 'N/A')
         weekly_avg = hrv_summary.get('weeklyAvg', 'N/A')
         max_5min = hrv_summary.get('lastNight5MinHigh', 'N/A')
         status = hrv_summary.get('status', 'N/A')
         
-        # Henter baseline dictionary
         baseline = hrv_summary.get('baseline', {})
         baseline_low = baseline.get('balancedLow', '?')
         baseline_high = baseline.get('balancedUpper', '?')
         
         hrv_details = (
             f"Siste natt: {last_night} ms\n"
-            f"- Ujesnitt (7 dager): {weekly_avg} ms\n"
+            f"- Ukesnitt (7 dager): {weekly_avg} ms\n"
             f"- Baseline: {baseline_low}-{baseline_high} ms\n"
             f"- 5 min maks: {max_5min} ms\n"
             f"- Status: {status}"
         )
     else:
-        # Fallback hvis hrvSummary mangler
-        print("Fant ikke detaljert hrvSummary, prøver fallback...")
+        # Fallback
         val = user_summary.get('hrvStatus') or user_summary.get('totalAverageHRV')
         if val:
             hrv_details = f"Siste natt: {val} (Mangler detaljer)"
@@ -150,23 +133,14 @@ Trening:
     """
     
     # Lagre til fil
-    with open("til_chat.txt", "w", encoding="utf-8") as f:
+    file_name = "til_chat.txt"
+    with open(file_name, "w", encoding="utf-8") as f:
         f.write(prompt_for_chat)
-    print("✅ Lagret 'til_chat.txt'")
-
-    # Send til Gemini (hvis nøkkel finnes)
-    if model:
-        try:
-            print("Kjører Gemini analyse...")
-            # Enkel feilhåndtering for å sjekke om modellen svarer
-            response = model.generate_content(prompt_for_chat + "\nGi en kort analyse av restitusjon og form.")
-            
-            with open("min_treningslogg.md", "a", encoding="utf-8") as f:
-                f.write(f"\n\n## {today_str}\n{response.text}\n")
-            print("✅ Treningslogg oppdatert.")
-        except Exception as e:
-            print(f"Gemini feilet: {e}")
-            print("Tips: Sjekk at API-nøkkelen har tilgang til 'gemini-1.5-flash'.")
+    
+    print("-" * 30)
+    print(f"✅ Suksess! Data er lagret i '{file_name}'")
+    print("Du kan nå åpne filen, kopiere alt, og lime det inn i Gemini.")
+    print("-" * 30)
 
 if __name__ == "__main__":
     main()
