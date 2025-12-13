@@ -5,7 +5,7 @@ Kropp & Helse:
 - Vekt: 80.8 kg
 - Fettprosent: 19.1%
 - Hvilepuls: 50
-- Stress: 33
+- Stress: 38
 - HRV: Siste natt: 51 ms | Ukesnitt: 55 ms | Status: UNBALANCED
 
 Ytelse (VO2 Max):
