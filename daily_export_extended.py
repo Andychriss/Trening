@@ -1,8 +1,6 @@
 import os
 import sys
 import datetime
-from datetime import timedelta
-from pathlib import Path
 from garminconnect import Garmin
 
 # --- 1. KONFIGURASJON ---
@@ -10,43 +8,26 @@ GARMIN_EMAIL = os.getenv("GARMIN_EMAIL")
 GARMIN_PASSWORD = os.getenv("GARMIN_PASSWORD")
 
 if not GARMIN_EMAIL:
-    current_dir = Path(__file__).parent
-    config_file = current_dir / 'config.txt'
-    if config_file.exists():
-        config = {}
-        try:
+    # Prøv å lese fra config.txt hvis miljøvariabler mangler
+    try:
+        from pathlib import Path
+        current_dir = Path(__file__).parent
+        config_file = current_dir / 'config.txt'
+        if config_file.exists():
             with open(config_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     if '=' in line and not line.strip().startswith('#'):
-                        key, value = line.split('=', 1)
-                        config[key.strip()] = value.strip().strip('"').strip("'")
-            GARMIN_EMAIL = config.get("GARMIN_EMAIL")
-            GARMIN_PASSWORD = config.get("GARMIN_PASSWORD")
-        except: pass
+                        k, v = line.split('=', 1)
+                        if k.strip() == "GARMIN_EMAIL": GARMIN_EMAIL = v.strip().strip('"\'')
+                        if k.strip() == "GARMIN_PASSWORD": GARMIN_PASSWORD = v.strip().strip('"\'')
+    except: pass
 
 if not GARMIN_EMAIL or not GARMIN_PASSWORD:
-    print("Mangler Garmin brukernavn/passord.")
+    print("Mangler brukernavn/passord.")
     sys.exit(1)
 
-def format_duration(seconds):
-    if not seconds: return "0m"
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    return f"{h}t {m}m" if h > 0 else f"{m}m"
-
-# Funksjon for å finne data bakover i tid (maks 5 dager)
-def get_latest_data(client_func, max_days=5):
-    today = datetime.date.today()
-    for i in range(max_days):
-        date_str = (today - timedelta(days=i)).isoformat()
-        try:
-            data = client_func(date_str)
-            if data: return data, date_str
-        except: pass
-    return {}, "Ingen data"
-
 def main():
-    print(f"Logger inn på Garmin...")
+    print("Logger inn på Garmin...")
     try:
         client = Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
         client.login()
@@ -58,157 +39,125 @@ def main():
     today_str = today.isoformat()
     print(f"Henter data for {today_str}...")
 
-    # --- 1. HENT BRUKERPROFIL (VIKTIGSTE KILDE FOR VEKT/FETT/VO2) ---
-    try:
-        full_profile = client.get_user_profile()
-        # Dataene ligger nesten alltid i 'userData'-nøkkelen
-        user_profile = full_profile.get('userData', {})
-    except:
-        user_profile = {}
+    # --- HENT DATA ---
+    # Vi henter bare de endepunktene vi vet inneholder dataene dine (basert på JSON-analysen)
+    user_profile = client.get_user_profile()
+    body_comp = client.get_body_composition(today_str)
+    training_status = client.get_training_status(today_str)
+    stats = client.get_stats(today_str)
+    hrv_data = client.get_hrv_data(today_str)
+    activities = client.get_activities_by_date(today_str, today_str, "")
 
-    # --- 2. HENT DAGLIG SAMMENDRAG (FALLBACK FOR LOAD) ---
-    # Vi sjekker i dag, så i går hvis i dag er tom
-    user_summary, summary_date = get_latest_data(client.get_user_summary, 2)
-    
-    # --- 3. HENT TRENINGSSTATUS ---
-    training_status, status_date = get_latest_data(client.get_training_status, 2)
+    # --- PARSING (NAKKEKIRURGI PÅ JSON-STRUKTUREN) ---
 
-    # --- 4. HENT HELSEDATA (HRV/PULS) ---
-    try: hrv_data = client.get_hrv_data(today_str) or {}
-    except: hrv_data = {}
-    
-    try: stats = client.get_stats(today_str) or {}
-    except: stats = {}
-
-    # --- 5. HENT AKTIVITETER ---
-    try: activities = client.get_activities_by_date(today_str, today_str, "") or []
-    except: activities = []
-
-
-    # --- PARSING (LOGIKK FOR Å FINNE TALLENE) ---
-
-    # A. VEKT & FETTPROSENT
+    # 1. VEKT & FETT (Fra Body Composition -> dateWeightList)
     weight_val = "N/A"
     body_fat = "N/A"
-
-    # Sjekk 1: Brukerprofilen (Der VO2 max lå)
-    if 'weight' in user_profile and user_profile['weight']:
-        weight_val = f"{user_profile['weight'] / 1000:.1f} kg"
     
-    if 'bodyFat' in user_profile and user_profile['bodyFat']:
-        body_fat = f"{user_profile['bodyFat']:.1f}%"
+    if body_comp and 'dateWeightList' in body_comp and body_comp['dateWeightList']:
+        # Hent nyeste måling
+        latest_measure = body_comp['dateWeightList'][0]
+        
+        if 'weight' in latest_measure:
+            # Garmin lagrer ofte vekt i gram (80800.0) -> del på 1000
+            w = latest_measure['weight']
+            weight_val = f"{w / 1000:.1f} kg"
+            
+        if 'bodyFat' in latest_measure:
+            body_fat = f"{latest_measure['bodyFat']}%"
+            
+    # Fallback for vekt: User Profile
+    if weight_val == "N/A" and user_profile:
+        w = user_profile.get('userData', {}).get('weight')
+        if w: weight_val = f"{w / 1000:.1f} kg"
 
-    # Sjekk 2: User Summary (Hvis du har veid deg i dag/igår)
-    if weight_val == "N/A" and 'weight' in user_summary:
-        weight_val = f"{user_summary['weight'] / 1000:.1f} kg"
-    
-    if body_fat == "N/A" and 'bodyFat' in user_summary:
-         body_fat = f"{user_summary['bodyFat']:.1f}%"
 
-    # B. VO2 MAX & FTP
-    vo2_run = user_profile.get('vo2MaxRunning', 'N/A')
-    vo2_cycle = user_profile.get('vo2MaxCycling', 'N/A')
-    
-    # FTP: Sjekker flere mulige nøkler i profilen
-    ftp_val = user_profile.get('ftp', user_profile.get('userFTP', user_profile.get('thresholdPower', 'N/A')))
-
-    # C. TRAINING LOAD
+    # 2. TRAINING LOAD (Fra Training Status -> EnhetsID -> acuteTrainingLoadDTO)
     acute_load = "N/A"
     chronic_load = "N/A"
     load_ratio = "N/A"
-    endurance_score = "N/A"
-
-    # Kilde 1: Training Status (Mest detaljert)
-    if training_status:
-        acute_load = training_status.get('acuteLoad') or training_status.get('sevenDayLoad')
-        chronic_load = training_status.get('chronicLoad') or training_status.get('longTermLoad')
-        load_ratio = training_status.get('loadRatio')
-        endurance_score = training_status.get('enduranceScore', 'N/A')
-
-    # Kilde 2: User Summary (Backup hvis status feilet)
-    if acute_load in [None, "N/A"] and user_summary:
-        # User Summary har ofte 'sevenDayTrainingLoad' selv om Training Status mangler
-        acute_load = user_summary.get('sevenDayTrainingLoad', user_summary.get('mostRecentActivityTrainingLoad', 'N/A'))
-
-    # Fiks formatering
-    if acute_load is None: acute_load = "N/A"
-    if chronic_load is None: chronic_load = "N/A"
     
-    # Regn ut ratio hvis vi har tallene men mangler ratioen
-    if load_ratio in [None, "N/A"] and acute_load != "N/A" and chronic_load != "N/A":
-        try:
-            load_ratio = round(float(acute_load) / float(chronic_load), 2)
-        except: pass
+    if training_status:
+        # Vi må grave oss ned: mostRecentTrainingStatus -> latestTrainingStatusData
+        recent_status = training_status.get('mostRecentTrainingStatus', {})
+        device_data_map = recent_status.get('latestTrainingStatusData', {})
+        
+        # Siden nøkkelen er en ukjent ID (f.eks "3468074856"), looper vi og tar første treff
+        for device_id, data in device_data_map.items():
+            if 'acuteTrainingLoadDTO' in data:
+                load_dto = data['acuteTrainingLoadDTO']
+                acute_load = load_dto.get('dailyTrainingLoadAcute', "N/A")
+                chronic_load = load_dto.get('dailyTrainingLoadChronic', "N/A")
+                load_ratio = load_dto.get('dailyAcuteChronicWorkloadRatio', "N/A")
+                break # Vi fant data, stopp letingen
 
-    # D. HELSE (HRV / PULS)
-    resting_hr = stats.get('restingHeartRate', user_profile.get('restingHeartRate', 'N/A'))
-    avg_stress = stats.get('averageStressLevel', 'N/A')
+    # 3. VO2 MAX (Fra User Profile)
+    vo2_run = "N/A"
+    vo2_cycle = "N/A"
+    if user_profile and 'userData' in user_profile:
+        u_data = user_profile['userData']
+        vo2_run = u_data.get('vo2MaxRunning', "N/A")
+        vo2_cycle = u_data.get('vo2MaxCycling', "N/A")
 
-    hrv_details = "N/A"
-    hrv_summary = hrv_data.get('hrvSummary', {})
-    if hrv_summary:
-        hrv_details = (f"Siste natt: {hrv_summary.get('lastNightAvg')} ms | "
-                       f"Ukesnitt: {hrv_summary.get('weeklyAvg')} ms | "
-                       f"Status: {hrv_summary.get('status')}")
+    # 4. HRV & HELSE
+    hrv_text = "N/A"
+    if hrv_data and 'hrvSummary' in hrv_data:
+        s = hrv_data['hrvSummary']
+        hrv_text = f"Siste: {s.get('lastNightAvg')} ms | Status: {s.get('status')}"
+    
+    resting_hr = stats.get('restingHeartRate', "N/A")
+    stress = stats.get('averageStressLevel', "N/A")
 
-    # E. AKTIVITETER
+    # 5. AKTIVITETER
     act_text = ""
     if activities:
         for act in activities:
-            name = act.get('activityName', 'Ukjent')
-            dur = format_duration(act.get('duration', 0))
-            avg_hr = act.get('averageHR', 'N/A')
+            name = act.get('activityName', 'Aktivitet')
+            dur_sec = act.get('duration', 0)
+            m, s = divmod(int(dur_sec), 60)
+            h, m = divmod(m, 60)
+            dur_str = f"{h}t {m}m" if h > 0 else f"{m}m"
             load = act.get('trainingLoad', 'N/A')
-            act_text += f"- {name}: {dur} | Puls: {avg_hr} | Load: {load}\n"
+            act_text += f"- {name}: {dur_str} (Load: {load})\n"
     else:
-        act_text = "Ingen trening registrert i dag."
+        act_text = "Ingen trening i dag."
 
-    # --- GENERER FIL ---
+    # --- GENERER RAPPORT ---
     prompt = f"""
-Hei Gemini! Data fra Garmin ({today_str}).
+Hei Gemini! Her er dagens tall ({today_str}).
 
 Kropp:
 - Vekt: {weight_val}
 - Fettprosent: {body_fat}
 - Hvilepuls: {resting_hr}
-- Stress: {avg_stress}
-- HRV: {hrv_details}
+- Stress: {stress}
+- HRV: {hrv_text}
 
 Ytelse:
-- VO2 Max Løp: {vo2_run}
-- VO2 Max Sykkel: {vo2_cycle}
-- FTP: {ftp_val} W
-- Endurance Score: {endurance_score}
+- VO2 Max: Løp {vo2_run} / Sykkel {vo2_cycle}
+- FTP: Ikke satt i profil (Autodetect er på)
 
-Belastning (Load):
-- Akutt (7-dager): {acute_load}
-- Kronisk (4-uker): {chronic_load}
+Belastning (Training Status):
+- Akutt Load (7 dager): {acute_load}
+- Kronisk Load (4 uker): {chronic_load}
 - Load Ratio: {load_ratio}
 
 Dagens Økter:
 {act_text}
+
+Gi meg en kort vurdering av belastning vs. restitusjon.
     """
-    
+
     with open("til_chat.txt", "w", encoding="utf-8") as f:
         f.write(prompt)
-    
-    print("-" * 40)
-    print(f"✅ Ferdig!")
-    print(f"Vekt: {weight_val} | Fett: {body_fat}")
-    print(f"VO2: {vo2_run} | FTP: {ftp_val}")
-    print(f"Load: {acute_load}")
-    print("-" * 40)
 
-    # --- DEBUG HJELP ---
-    # Hvis fettprosent fortsatt er N/A, printer vi alle nøklene i profilen din
-    if body_fat == "N/A":
-        print("\n[DEBUG] Fettprosent mangler. Her er nøklene i din profil (sjekk om bodyFat heter noe annet):")
-        print(list(user_profile.keys()))
-    
-    if acute_load == "N/A":
-        print("\n[DEBUG] Load mangler. Her er nøklene i User Summary:")
-        keys_with_load = [k for k in user_summary.keys() if 'load' in k.lower()]
-        print(keys_with_load)
+    print("-" * 40)
+    print(f"✅ SUKSESS! Data funnet:")
+    print(f"   Vekt: {weight_val} | Fett: {body_fat}")
+    print(f"   Load: {acute_load} / {chronic_load} (Ratio: {load_ratio})")
+    print(f"   VO2:  {vo2_run}")
+    print("-" * 40)
+    print("Filen 'til_chat.txt' er klar.")
 
 if __name__ == "__main__":
     main()
