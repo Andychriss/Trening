@@ -8,7 +8,7 @@ Helse:
 
 HRV Data:
 Siste natt: 51 ms
-- Ujesnitt (7 dager): 55 ms
+- Ukesnitt (7 dager): 55 ms
 - Baseline: 57-76 ms
 - 5 min maks: 79 ms
 - Status: UNBALANCED
