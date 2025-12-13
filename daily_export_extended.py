@@ -127,4 +127,82 @@ def main():
     # -- Training Load --
     acute_load = train_status.get('acuteLoad', 'N/A')
     chronic_load = train_status.get('chronicLoad', 'N/A')
-    load_ratio = train_status.get('loadRatio',
+    load_ratio = train_status.get('loadRatio', 'N/A')
+    endurance_score = train_status.get('enduranceScore', 'N/A')
+
+    # Beregn ratio hvis mangler
+    if load_ratio == "N/A" and isinstance(acute_load, (int, float)) and isinstance(chronic_load, (int, float)):
+        if chronic_load > 0: load_ratio = round(acute_load / chronic_load, 2)
+
+    # -- Helse (HRV & Puls) --
+    resting_hr = stats.get('restingHeartRate', 'N/A')
+    # Hvis hvilepuls mangler i dag, sjekk profil
+    if resting_hr == "N/A": resting_hr = user_profile.get('restingHeartRate', 'N/A')
+    
+    avg_stress = stats.get('averageStressLevel', 'N/A')
+
+    hrv_details = "N/A"
+    hrv_summary = hrv_data.get('hrvSummary', {})
+    if hrv_summary:
+        last_night = hrv_summary.get('lastNightAvg', 'N/A')
+        weekly = hrv_summary.get('weeklyAvg', 'N/A')
+        status = hrv_summary.get('status', 'N/A')
+        hrv_details = f"Siste: {last_night}ms | Uke: {weekly}ms | {status}"
+
+    # -- Aktiviteter --
+    act_text = ""
+    if activities:
+        for act in activities:
+            name = act.get('activityName', 'Ukjent')
+            dur = format_duration(act.get('duration', 0))
+            avg_hr = act.get('averageHR', 'N/A')
+            load = act.get('trainingLoad', 'N/A')
+            act_text += f"- {name}: {dur} | Puls: {avg_hr} | Load: {load}\n"
+    else:
+        act_text = "Ingen trening registrert i dag."
+
+    # --- 4. LAGRE TIL FIL ---
+    prompt = f"""
+Hei Gemini! Her er status fra Garmin per {today_str}.
+
+Kropp & Helse:
+- Vekt: {weight_val} (Dato: {body_date})
+- Fettprosent: {body_fat}
+- Hvilepuls: {resting_hr}
+- Stress: {avg_stress}
+- HRV: {hrv_details}
+
+Kapasitet:
+- VO2 Max Løp: {vo2_run}
+- VO2 Max Sykkel: {vo2_cycle}
+- FTP: {ftp_val} W
+- Endurance Score: {endurance_score}
+
+Belastning (Training Status fra {train_date}):
+- Akutt Load: {acute_load}
+- Kronisk Load: {chronic_load}
+- Load Ratio: {load_ratio}
+
+Dagens Økter:
+{act_text}
+    """
+    
+    with open("til_chat.txt", "w", encoding="utf-8") as f:
+        f.write(prompt)
+    
+    print("-" * 40)
+    print("✅ Suksess!")
+    print(f"Vekt: {weight_val}")
+    print(f"VO2 Max: {vo2_run} / {vo2_cycle}")
+    print(f"Load: {acute_load} / {chronic_load}")
+    print(f"Fil lagret: 'til_chat.txt'")
+    print("-" * 40)
+
+    # DEBUG: Hvis du fortsatt får N/A på VO2, sjekk hva som faktisk ligger i userData
+    if vo2_run == "N/A":
+        print("\n[DEBUG] Tilgjengelige nøkler i user_profile['userData']:")
+        # Printer bare nøklene for å ikke spamme skjermen med personinfo
+        print(list(user_profile.keys()))
+
+if __name__ == "__main__":
+    main()
