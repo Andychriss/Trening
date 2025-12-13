@@ -2,10 +2,9 @@ name: Hent Garmin Data
 
 on:
   schedule:
-    # Kjører kl 23:00 norsk tid (ca).
-    # Merk: GitHub bruker UTC tid, så 22:00 UTC er 23:00 i Norge (vintertid)
-    - cron: '0 22 * * *'
-  workflow_dispatch: # Gjør at du kan trykke på en knapp for å teste manuelt
+    # 20:00 UTC = 21:00 Norsk vintertid (22:00 sommertid)
+    - cron: '0 20 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -34,8 +33,9 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: python daily_export_extended.py
 
-    - name: Lagre endringer i loggen
+    - name: Lagre filene
       uses: stefanzweifel/git-auto-commit-action@v5
       with:
-        commit_message: Oppdaterte treningslogg for i dag
-        file_pattern: min_treningslogg.md
+        commit_message: Oppdaterte data for i dag
+        # Her legger vi til begge filene vi vil ta vare på:
+        file_pattern: 'min_treningslogg.md til_chat.txt'
