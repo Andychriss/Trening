@@ -6,12 +6,11 @@ Kropp & Helse:
 - Fettprosent: 19.1%
 - Hvilepuls: 50
 - Stress: 33
-- HRV: Siste: 51 ms | Status: UNBALANCED
+- HRV: Siste natt: 51 ms | Ukesnitt: 55 ms | Status: UNBALANCED
 
-Ytelse:
-- Endurance Score: N/A
-- VO2 Max: Løp 56.0 / Sykkel 56.0
-- FTP: (Autodetect)
+Ytelse (VO2 Max):
+- Løp: 56.0
+- Sykkel: 56.0
 
 Belastning (Training Status):
 - Akutt Load (7 dager): 324
@@ -21,5 +20,5 @@ Belastning (Training Status):
 Dagens Økter:
 Ingen trening i dag.
 
-Gi meg en kort vurdering av belastning vs. restitusjon.
+Gi en kort analyse av dagens status.
     
