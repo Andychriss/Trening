@@ -46,54 +46,79 @@ def main():
     today_str = today.isoformat()
     print(f"Henter data for {today_str}...")
 
-    # --- HENTING AV DATA ---
-    try:
-        # 1. Grunnleggende daglig info
-        stats = client.get_stats(today_str) or {}
-        user_summary = client.get_user_summary(today_str) or {}
-        
-        # 2. Helse (HRV/Søvn)
-        try: hrv_data = client.get_hrv_data(today_str) or {}
-        except: hrv_data = {}
-        sleep_data = client.get_sleep_data(today_str) or {}
+    # --- INITIALISER VARIABLER ---
+    stats = {}
+    user_summary = {}
+    hrv_data = {}
+    sleep_data = {}
+    user_profile = {}
+    training_status = {}
+    body_comp = {}
+    activities = []
 
-        # 3. Profil & Innstillinger (Her ligger ofte VO2, Vekt, FTP hvis det ikke er oppdatert i dag)
-        user_profile = client.get_user_profile() or {}
-        user_settings = client.get_user_settings() or {}
-        
-        # 4. Training Status (Load, Endurance)
-        try: training_status = client.get_training_status(today_str) or {}
-        except: training_status = {}
+    # --- HENT DATA (Hver for seg for å unngå krasj) ---
+    
+    # 1. Stats og Summary
+    try: stats = client.get_stats(today_str) or {}
+    except: pass
+    
+    try: user_summary = client.get_user_summary(today_str) or {}
+    except: pass
 
-        # 5. Aktiviteter
-        activities = client.get_activities_by_date(today_str, today_str, "") or []
+    # 2. Helse
+    try: hrv_data = client.get_hrv_data(today_str) or {}
+    except: pass
+    
+    try: sleep_data = client.get_sleep_data(today_str) or {}
+    except: pass
 
-    except Exception as e:
-        print(f"Kritisk feil ved henting av data: {e}")
-        return
+    # 3. Profil (Viktig for Vekt/VO2 fallback)
+    try: user_profile = client.get_user_profile() or {}
+    except: pass
+
+    # 4. Kroppssammensetning
+    try: body_comp = client.get_body_composition(today_str) or {}
+    except: pass
+
+    # 5. Training Status
+    try: training_status = client.get_training_status(today_str) or {}
+    except: pass
+
+    # 6. Aktiviteter
+    try: activities = client.get_activities_by_date(today_str, today_str, "") or []
+    except: pass
+
 
     # --- PARSING AV DATA ---
 
     # -- Vekt & Kropp --
-    # Sjekker User Summary (dagens vekt) -> fallback til User Profile (siste registrerte)
     weight_val = "N/A"
-    if 'weight' in user_summary and user_summary['weight']:
-        weight_val = f"{user_summary['weight'] / 1000:.1f} kg"
-    elif 'weight' in user_profile and user_profile['weight']:
-        weight_val = f"{user_profile['weight'] / 1000:.1f} kg"
-    
     body_fat = "N/A"
-    # Sjekker user_summary (hvis veid i dag) -> fallback user_profile
-    if 'bodyFat' in user_summary and user_summary['bodyFat']:
-        body_fat = f"{user_summary['bodyFat']:.1f}%" 
-    elif 'bodyFat' in user_profile: # Noen ganger ligger det her
+    
+    # Prioritet 1: Body Composition (hvis veid i dag)
+    if 'totalBodyWeight' in body_comp and body_comp['totalBodyWeight']:
+        weight_val = f"{body_comp['totalBodyWeight'] / 1000:.1f} kg"
+    if 'totalBodyFat' in body_comp and body_comp['totalBodyFat']:
+        body_fat = f"{body_comp['totalBodyFat']:.1f}%"
+        
+    # Prioritet 2: User Summary (hvis veid i dag)
+    if weight_val == "N/A" and 'weight' in user_summary and user_summary['weight']:
+         weight_val = f"{user_summary['weight'] / 1000:.1f} kg"
+    
+    # Prioritet 3: User Profile (siste kjente)
+    if weight_val == "N/A" and 'weight' in user_profile and user_profile['weight']:
+        weight_val = f"{user_profile['weight'] / 1000:.1f} kg"
+        
+    # Fallback fettprosent
+    if body_fat == "N/A" and 'bodyFat' in user_profile and user_profile['bodyFat']:
         body_fat = f"{user_profile['bodyFat']:.1f}%"
+
 
     # -- Helse --
     resting_hr = stats.get('restingHeartRate', 'N/A')
     avg_stress = stats.get('averageStressLevel', 'N/A')
 
-    # -- HRV (Samme logikk som fungerte sist) --
+    # -- HRV --
     hrv_details = "N/A"
     hrv_summary = hrv_data.get('hrvSummary', {})
     if hrv_summary:
@@ -115,28 +140,21 @@ def main():
         if val: hrv_details = f"{val}"
 
     # -- Ytelse (VO2, FTP) --
-    # VO2 Max: Sjekker training status først, så user profile
     vo2_run = "N/A"
     vo2_cycle = "N/A"
 
-    # Metode 1: User Profile (Oftest mest pålitelig for "current status")
+    # Sjekk User Profile først (mest pålitelig for "nåværende form")
     if 'vo2MaxRunning' in user_profile: vo2_run = user_profile['vo2MaxRunning']
     if 'vo2MaxCycling' in user_profile: vo2_cycle = user_profile['vo2MaxCycling']
 
-    # Metode 2: User Summary (Hvis oppdatert i dag, overskriv)
-    if 'vo2MaxRunning' in user_summary and user_summary['vo2MaxRunning']: vo2_run = user_summary['vo2MaxRunning']
-    if 'vo2MaxCycling' in user_summary and user_summary['vo2MaxCycling']: vo2_cycle = user_summary['vo2MaxCycling']
-
     # FTP
     ftp_val = "N/A"
-    # Ligger ofte i user_settings under 'power_zones' eller lignende, men enklest å sjekke user profile
-    # Merk: Garmin API er rotete på FTP. Vi sjekker user_summary først.
-    if 'ftp' in user_summary: 
-        ftp_val = user_summary['ftp']
-    elif 'userFTP' in user_profile:
+    if 'userFTP' in user_profile:
         ftp_val = user_profile['userFTP']
+    elif 'ftp' in user_summary:
+        ftp_val = user_summary['ftp']
     
-    # Endurance Score (Kun tilgjengelig i nyere klokker via training status)
+    # Endurance Score
     endurance_score = "N/A"
     if training_status and 'enduranceScore' in training_status:
         endurance_score = training_status['enduranceScore']
@@ -147,12 +165,11 @@ def main():
     load_ratio = "N/A"
     
     if training_status:
-        # Load-navn kan variere. Vi prøver standard.
         acute_load = training_status.get('acuteLoad', 'N/A')
         chronic_load = training_status.get('chronicLoad', 'N/A')
         load_ratio = training_status.get('loadRatio', 'N/A')
         
-        # Hvis loadRatio mangler, men vi har acute og chronic, regn ut manuelt
+        # Beregn ratio manuelt hvis den mangler
         if load_ratio == "N/A" and isinstance(acute_load, (int, float)) and isinstance(chronic_load, (int, float)):
              if chronic_load > 0:
                  load_ratio = round(acute_load / chronic_load, 2)
@@ -164,8 +181,19 @@ def main():
             name = act.get('activityName', 'Ukjent')
             dur = format_duration(act.get('duration', 0))
             avg_hr = act.get('averageHR', 'N/A')
-            session_load = act.get('trainingLoad', 'N/A') # Load for økta
-            act_text += f"- {name}: {dur} | Puls: {avg_hr} | Load: {session_load}\n"
+            session_load = act.get('trainingLoad', 'N/A')
+            
+            # Prøv å hente soner
+            zones_txt = ""
+            try:
+                # Sone-kall kan også feile, så vi wrapper det
+                zones = client.get_activity_hr_in_timezones(act.get('activityId'))
+                if zones:
+                    z_list = [f"S{z['zoneNumber']}: {format_duration(z['secsInZone'])}" for z in zones if z.get('secsInZone')]
+                    zones_txt = ", ".join(z_list)
+            except: pass
+            
+            act_text += f"- {name}: {dur} | Puls: {avg_hr} | Load: {session_load}\n  Soner: {zones_txt}\n"
     else:
         act_text = "Ingen trening registrert i dag."
 
@@ -202,15 +230,9 @@ Ta hensyn til acute/chronic load ratio og HRV når du analyserer totalbelastning
         f.write(prompt_for_chat)
     
     print("-" * 40)
-    print(f"✅ Data hentet!\n- Vekt: {weight_val}\n- Load: {acute_load}/{chronic_load}\n- VO2: Løp {vo2_run} / Sykkel {vo2_cycle}")
-    print(f"\nFull rapport lagret i 'til_chat.txt'.")
+    print(f"✅ Data hentet og lagret i 'til_chat.txt'")
+    print(f"Vekt: {weight_val}, VO2: {vo2_run}/{vo2_cycle}, Load: {acute_load}")
     print("-" * 40)
-
-    # --- DEBUG INFO (HVIS FORTSATT N/A) ---
-    # Hvis du fortsatt får N/A, vil denne utskriften hjelpe oss å se hvilke nøkler som faktisk finnes.
-    if acute_load == "N/A":
-        print("\n[DEBUG] Training Status Keys (hva fant vi?):")
-        print(training_status.keys() if training_status else "Training Status er tom (None)")
 
 if __name__ == "__main__":
     main()
