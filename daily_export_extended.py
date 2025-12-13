@@ -1,6 +1,7 @@
 import os
 import sys
 import datetime
+from datetime import timedelta
 from pathlib import Path
 from garminconnect import Garmin
 
@@ -27,11 +28,26 @@ if not GARMIN_EMAIL or not GARMIN_PASSWORD:
     print("Mangler Garmin brukernavn/passord.")
     sys.exit(1)
 
+# --- 2. HJELPEFUNKSJONER ---
 def format_duration(seconds):
     if not seconds: return "0m"
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
     return f"{h}t {m}m" if h > 0 else f"{m}m"
+
+# Ny funksjon: Søk bakover i tid etter data
+def find_latest_data(client_func, max_days=30):
+    today = datetime.date.today()
+    for i in range(max_days):
+        check_date = (today - timedelta(days=i)).isoformat()
+        try:
+            data = client_func(check_date)
+            # Sjekk om dataen faktisk inneholder noe nyttig (ikke bare tomme strukturer)
+            if data:
+                return data, check_date
+        except:
+            pass
+    return {}, "Ingen data"
 
 def main():
     print(f"Logger inn på Garmin...")
@@ -44,75 +60,51 @@ def main():
 
     today = datetime.date.today()
     today_str = today.isoformat()
-    print(f"Henter data for {today_str}...")
+    print(f"Henter data (Søker bakover hvis dagens data mangler)...")
 
-    # --- INITIALISER VARIABLER ---
-    stats = {}
-    user_summary = {}
-    hrv_data = {}
-    sleep_data = {}
-    user_profile = {}
-    training_status = {}
-    body_comp = {}
-    activities = []
+    # --- HENT DATA (SMARTERE SØK) ---
 
-    # --- HENT DATA (Hver for seg for å unngå krasj) ---
-    
-    # 1. Stats og Summary
+    # 1. Grunnleggende (Må være i dag)
     try: stats = client.get_stats(today_str) or {}
-    except: pass
+    except: stats = {}
     
-    try: user_summary = client.get_user_summary(today_str) or {}
-    except: pass
-
-    # 2. Helse
     try: hrv_data = client.get_hrv_data(today_str) or {}
-    except: pass
-    
-    try: sleep_data = client.get_sleep_data(today_str) or {}
-    except: pass
+    except: hrv_data = {}
 
-    # 3. Profil (Viktig for Vekt/VO2 fallback)
+    # 2. Vekt & Kropp (Søk bakover 30 dager)
+    # Mange veier seg ikke hver dag. Vi finner siste registrering.
+    body_comp, body_date = find_latest_data(client.get_body_composition, max_days=30)
+    print(f"Fant kroppsdata fra: {body_date}")
+
+    # 3. Training Status (Søk bakover 3 dager)
+    # Load beregnes ofte natten over. Hvis dagens er tom, sjekk i går.
+    train_status, train_date = find_latest_data(client.get_training_status, max_days=3)
+    print(f"Fant treningsstatus fra: {train_date}")
+
+    # 4. User Profile (Statisk info som VO2/FTP ligger ofte her)
     try: user_profile = client.get_user_profile() or {}
-    except: pass
+    except: user_profile = {}
 
-    # 4. Kroppssammensetning
-    try: body_comp = client.get_body_composition(today_str) or {}
-    except: pass
-
-    # 5. Training Status
-    try: training_status = client.get_training_status(today_str) or {}
-    except: pass
-
-    # 6. Aktiviteter
+    # 5. Aktiviteter (Kun i dag)
     try: activities = client.get_activities_by_date(today_str, today_str, "") or []
-    except: pass
+    except: activities = []
 
 
-    # --- PARSING AV DATA ---
+    # --- PARSING ---
 
-    # -- Vekt & Kropp --
+    # -- Vekt --
     weight_val = "N/A"
     body_fat = "N/A"
     
-    # Prioritet 1: Body Composition (hvis veid i dag)
+    # Sjekk historisk søk først
     if 'totalBodyWeight' in body_comp and body_comp['totalBodyWeight']:
         weight_val = f"{body_comp['totalBodyWeight'] / 1000:.1f} kg"
     if 'totalBodyFat' in body_comp and body_comp['totalBodyFat']:
         body_fat = f"{body_comp['totalBodyFat']:.1f}%"
-        
-    # Prioritet 2: User Summary (hvis veid i dag)
-    if weight_val == "N/A" and 'weight' in user_summary and user_summary['weight']:
-         weight_val = f"{user_summary['weight'] / 1000:.1f} kg"
     
-    # Prioritet 3: User Profile (siste kjente)
-    if weight_val == "N/A" and 'weight' in user_profile and user_profile['weight']:
+    # Fallback til profil hvis historisk søk feilet
+    if weight_val == "N/A" and 'weight' in user_profile:
         weight_val = f"{user_profile['weight'] / 1000:.1f} kg"
-        
-    # Fallback fettprosent
-    if body_fat == "N/A" and 'bodyFat' in user_profile and user_profile['bodyFat']:
-        body_fat = f"{user_profile['bodyFat']:.1f}%"
-
 
     # -- Helse --
     resting_hr = stats.get('restingHeartRate', 'N/A')
@@ -124,55 +116,41 @@ def main():
     if hrv_summary:
         last_night = hrv_summary.get('lastNightAvg', 'N/A')
         weekly_avg = hrv_summary.get('weeklyAvg', 'N/A')
-        max_5min = hrv_summary.get('lastNight5MinHigh', 'N/A')
         status = hrv_summary.get('status', 'N/A')
-        baseline = hrv_summary.get('baseline', {})
-        b_low = baseline.get('balancedLow', '?')
-        b_high = baseline.get('balancedUpper', '?')
-        hrv_details = (
-            f"Siste natt: {last_night} ms\n"
-            f"- Ukesnitt: {weekly_avg} ms (Baseline: {b_low}-{b_high})\n"
-            f"- 5 min maks: {max_5min} ms\n"
-            f"- Status: {status}"
-        )
+        hrv_details = f"Siste natt: {last_night} ms\n- Ukesnitt: {weekly_avg} ms\n- Status: {status}"
     else:
-        val = user_summary.get('hrvStatus')
-        if val: hrv_details = f"{val}"
+        # Fallback til enkel verdi fra stats
+        if 'hrvStatus' in user_profile:
+             hrv_details = user_profile['hrvStatus']
 
-    # -- Ytelse (VO2, FTP) --
-    vo2_run = "N/A"
-    vo2_cycle = "N/A"
-
-    # Sjekk User Profile først (mest pålitelig for "nåværende form")
-    if 'vo2MaxRunning' in user_profile: vo2_run = user_profile['vo2MaxRunning']
-    if 'vo2MaxCycling' in user_profile: vo2_cycle = user_profile['vo2MaxCycling']
-
-    # FTP
-    ftp_val = "N/A"
-    if 'userFTP' in user_profile:
-        ftp_val = user_profile['userFTP']
-    elif 'ftp' in user_summary:
-        ftp_val = user_summary['ftp']
-    
-    # Endurance Score
-    endurance_score = "N/A"
-    if training_status and 'enduranceScore' in training_status:
-        endurance_score = training_status['enduranceScore']
-
-    # -- Training Load --
+    # -- Training Load & Status --
     acute_load = "N/A"
     chronic_load = "N/A"
     load_ratio = "N/A"
+    endurance_score = "N/A"
     
-    if training_status:
-        acute_load = training_status.get('acuteLoad', 'N/A')
-        chronic_load = training_status.get('chronicLoad', 'N/A')
-        load_ratio = training_status.get('loadRatio', 'N/A')
+    if train_status:
+        acute_load = train_status.get('acuteLoad', 'N/A')
+        chronic_load = train_status.get('chronicLoad', 'N/A')
+        load_ratio = train_status.get('loadRatio', 'N/A')
+        endurance_score = train_status.get('enduranceScore', 'N/A')
         
-        # Beregn ratio manuelt hvis den mangler
+        # Beregn ratio manuelt hvis mangler
         if load_ratio == "N/A" and isinstance(acute_load, (int, float)) and isinstance(chronic_load, (int, float)):
-             if chronic_load > 0:
-                 load_ratio = round(acute_load / chronic_load, 2)
+            if chronic_load > 0: load_ratio = round(acute_load / chronic_load, 2)
+
+    # -- VO2 Max & FTP --
+    # VO2 ligger ofte i User Profile ELLER stats for en gitt dag
+    vo2_run = user_profile.get('vo2MaxRunning', 'N/A')
+    vo2_cycle = user_profile.get('vo2MaxCycling', 'N/A')
+    
+    # FTP - Ligger ofte dypt i profilen eller settings. 
+    # Vi sjekker user_profile for 'userFTP' eller 'ftp'
+    ftp_val = user_profile.get('userFTP', user_profile.get('ftp', 'N/A'))
+
+    # Hvis VO2 fortsatt er N/A, sjekk 'stats' fra i dag
+    if vo2_run == "N/A": vo2_run = stats.get('vo2MaxRunning', 'N/A')
+    if vo2_cycle == "N/A": vo2_cycle = stats.get('vo2MaxCycling', 'N/A')
 
     # -- Aktiviteter --
     act_text = ""
@@ -181,25 +159,15 @@ def main():
             name = act.get('activityName', 'Ukjent')
             dur = format_duration(act.get('duration', 0))
             avg_hr = act.get('averageHR', 'N/A')
-            session_load = act.get('trainingLoad', 'N/A')
-            
-            # Prøv å hente soner
-            zones_txt = ""
-            try:
-                # Sone-kall kan også feile, så vi wrapper det
-                zones = client.get_activity_hr_in_timezones(act.get('activityId'))
-                if zones:
-                    z_list = [f"S{z['zoneNumber']}: {format_duration(z['secsInZone'])}" for z in zones if z.get('secsInZone')]
-                    zones_txt = ", ".join(z_list)
-            except: pass
-            
-            act_text += f"- {name}: {dur} | Puls: {avg_hr} | Load: {session_load}\n  Soner: {zones_txt}\n"
+            load = act.get('trainingLoad', 'N/A')
+            act_text += f"- {name}: {dur} | Puls: {avg_hr} | Load: {load}\n"
     else:
         act_text = "Ingen trening registrert i dag."
 
     # --- GENERER TEKSTFIL ---
     prompt_for_chat = f"""
-Hei Gemini! Her er en fullstendig statusrapport fra Garmin ({today_str}).
+Hei Gemini! Her er en statusrapport fra Garmin ({today_str}).
+Merk: Noen data kan være hentet fra siste registrerte måling (opptil 30 dager tilbake).
 
 Fysiometri & Helse:
 - Vekt: {weight_val}
@@ -215,24 +183,29 @@ Ytelse & Kapasitet:
 - Cycling FTP: {ftp_val} W
 - Endurance Score: {endurance_score}
 
-Training Load (Belastning):
-- Akutt Load (7 dager): {acute_load}
-- Kronisk Load (4 uker): {chronic_load}
+Training Load (Fra {train_date}):
+- Akutt Load: {acute_load}
+- Kronisk Load: {chronic_load}
 - Load Ratio: {load_ratio}
 
 Dagens Økter:
 {act_text}
-
-Ta hensyn til acute/chronic load ratio og HRV når du analyserer totalbelastningen.
     """
     
     with open("til_chat.txt", "w", encoding="utf-8") as f:
         f.write(prompt_for_chat)
     
     print("-" * 40)
-    print(f"✅ Data hentet og lagret i 'til_chat.txt'")
-    print(f"Vekt: {weight_val}, VO2: {vo2_run}/{vo2_cycle}, Load: {acute_load}")
+    print(f"✅ Rapport generert!")
+    print(f"Vekt funnet: {weight_val} (Dato: {body_date})")
+    print(f"Load funnet: {acute_load} (Dato: {train_date})")
+    print(f"VO2 Max: Løp {vo2_run} / Sykkel {vo2_cycle}")
     print("-" * 40)
+    
+    # DEBUG: Hvis du fortsatt får N/A, vil dette vise hva User Profile faktisk inneholder
+    if vo2_run == "N/A" and vo2_cycle == "N/A":
+        print("\n[DEBUG] Innhold i User Profile (nøkler):")
+        print(list(user_profile.keys()))
 
 if __name__ == "__main__":
     main()
