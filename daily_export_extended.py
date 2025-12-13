@@ -39,11 +39,14 @@ def format_duration(seconds):
     return f"{h}t {m}m" if h > 0 else f"{m}m"
 
 def main():
-    # Oppsett av Gemini
+    # Oppsett av Gemini - Endret modellnavn til standard 1.5 flash
     model = None
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-flash-latest')
+        try:
+            model = genai.GenerativeModel('gemini-flash-latest')
+        except Exception as e:
+            print(f"Kunne ikke konfigurere modell: {e}")
 
     print(f"Logger inn på Garmin...")
     try:
@@ -60,7 +63,6 @@ def main():
     # Hent data
     try:
         stats = client.get_stats(today_str) or {}
-        # Vi henter HRV, men ignorerer feil midlertidig for å unngå kræsj
         try: hrv_data = client.get_hrv_data(today_str) or {}
         except: hrv_data = {}
         
@@ -70,32 +72,44 @@ def main():
     except Exception as e:
         print(f"Feil ved henting av data: {e}")
         stats, hrv_data, sleep_data, activities, user_summary = {}, {}, {}, [], {}
-
-    # --- DEBUG UTKRIFT (Vises i GitHub Logs) ---
-    print(f"DEBUG - HRV Raw: {hrv_data}") 
     
     # Pakk ut verdier
     resting_hr = stats.get('restingHeartRate', 'N/A')
     avg_stress = stats.get('averageStressLevel', 'N/A')
     
-    # --- NY HRV LOGIKK ---
-    hrv_val = "N/A"
+    # --- NY HRV LOGIKK (OPPDATERT) ---
+    # Vi lager en strukturert tekst for HRV basert på feltene du fant i loggen
+    hrv_details = "N/A"
     
-    # Forsøk 1: Hent fra hrvSummary
-    if 'hrvSummary' in hrv_data and hrv_data['hrvSummary']:
-        hrv_val = hrv_data['hrvSummary'].get('lastNightAverage', 'N/A')
+    hrv_summary = hrv_data.get('hrvSummary', {})
     
-    # Forsøk 2: Hvis N/A, sjekk om det ligger i User Summary (ofte mer stabilt)
-    if hrv_val == "N/A" or hrv_val is None:
-        print("Fant ikke HRV i standard-feltet, sjekker reserveløsning...")
-        if 'hrvStatus' in user_summary:
-            hrv_val = user_summary['hrvStatus']
-        elif 'totalAverageHRV' in user_summary:
-             hrv_val = user_summary['totalAverageHRV']
+    if hrv_summary:
+        # Henter ut spesifikke felter basert på din logg
+        last_night = hrv_summary.get('lastNightAvg', 'N/A')
+        weekly_avg = hrv_summary.get('weeklyAvg', 'N/A')
+        max_5min = hrv_summary.get('lastNight5MinHigh', 'N/A')
+        status = hrv_summary.get('status', 'N/A')
+        
+        # Henter baseline dictionary
+        baseline = hrv_summary.get('baseline', {})
+        baseline_low = baseline.get('balancedLow', '?')
+        baseline_high = baseline.get('balancedUpper', '?')
+        
+        hrv_details = (
+            f"Siste natt: {last_night} ms\n"
+            f"- Ujesnitt (7 dager): {weekly_avg} ms\n"
+            f"- Baseline: {baseline_low}-{baseline_high} ms\n"
+            f"- 5 min maks: {max_5min} ms\n"
+            f"- Status: {status}"
+        )
+    else:
+        # Fallback hvis hrvSummary mangler
+        print("Fant ikke detaljert hrvSummary, prøver fallback...")
+        val = user_summary.get('hrvStatus') or user_summary.get('totalAverageHRV')
+        if val:
+            hrv_details = f"Siste natt: {val} (Mangler detaljer)"
 
-    # Fiks format hvis det er None
-    if hrv_val is None: hrv_val = "N/A"
-
+    # Søvn
     sleep_val = "N/A"
     if 'dailySleepDTO' in sleep_data:
         sec = sleep_data['dailySleepDTO'].get('sleepTimeSeconds', 0)
@@ -125,9 +139,11 @@ Hei Gemini! Her er dagens tall fra Garmin ({today_str}).
 
 Helse:
 - Hvilepuls: {resting_hr}
-- HRV (siste natt): {hrv_val}
-- Stress: {avg_stress}
-- Søvn: {sleep_val}
+- Stressnivå: {avg_stress}
+- Søvnvarighet: {sleep_val}
+
+HRV Data:
+{hrv_details}
 
 Trening:
 {act_text}
@@ -142,13 +158,15 @@ Trening:
     if model:
         try:
             print("Kjører Gemini analyse...")
-            response = model.generate_content(prompt_for_chat + "\nGi en kort analyse.")
+            # Enkel feilhåndtering for å sjekke om modellen svarer
+            response = model.generate_content(prompt_for_chat + "\nGi en kort analyse av restitusjon og form.")
+            
             with open("min_treningslogg.md", "a", encoding="utf-8") as f:
                 f.write(f"\n\n## {today_str}\n{response.text}\n")
             print("✅ Treningslogg oppdatert.")
         except Exception as e:
             print(f"Gemini feilet: {e}")
+            print("Tips: Sjekk at API-nøkkelen har tilgang til 'gemini-1.5-flash'.")
 
 if __name__ == "__main__":
     main()
-
