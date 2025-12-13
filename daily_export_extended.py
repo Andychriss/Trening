@@ -10,7 +10,7 @@ GARMIN_EMAIL = os.getenv("GARMIN_EMAIL")
 GARMIN_PASSWORD = os.getenv("GARMIN_PASSWORD")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Fallback til lokal fil hvis vi kjører lokalt
+# Fallback til lokal fil
 if not GARMIN_EMAIL:
     current_dir = Path(__file__).parent
     config_file = current_dir / 'config.txt'
@@ -39,11 +39,11 @@ def format_duration(seconds):
     return f"{h}t {m}m" if h > 0 else f"{m}m"
 
 def main():
-    # Oppsett av Gemini (hvis nøkkel finnes)
+    # Oppsett av Gemini
     model = None
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-flash-latest')
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
     print(f"Logger inn på Garmin...")
     try:
@@ -60,19 +60,41 @@ def main():
     # Hent data
     try:
         stats = client.get_stats(today_str) or {}
-        hrv_data = client.get_hrv_data(today_str) or {}
+        # Vi henter HRV, men ignorerer feil midlertidig for å unngå kræsj
+        try: hrv_data = client.get_hrv_data(today_str) or {}
+        except: hrv_data = {}
+        
         sleep_data = client.get_sleep_data(today_str) or {}
+        user_summary = client.get_user_summary(today_str) or {}
         activities = client.get_activities_by_date(today_str, today_str, "") or []
-    except:
-        stats, hrv_data, sleep_data, activities = {}, {}, {}, []
+    except Exception as e:
+        print(f"Feil ved henting av data: {e}")
+        stats, hrv_data, sleep_data, activities, user_summary = {}, {}, {}, [], {}
 
+    # --- DEBUG UTKRIFT (Vises i GitHub Logs) ---
+    print(f"DEBUG - HRV Raw: {hrv_data}") 
+    
     # Pakk ut verdier
     resting_hr = stats.get('restingHeartRate', 'N/A')
     avg_stress = stats.get('averageStressLevel', 'N/A')
     
+    # --- NY HRV LOGIKK ---
     hrv_val = "N/A"
-    if 'hrvSummary' in hrv_data:
+    
+    # Forsøk 1: Hent fra hrvSummary
+    if 'hrvSummary' in hrv_data and hrv_data['hrvSummary']:
         hrv_val = hrv_data['hrvSummary'].get('lastNightAverage', 'N/A')
+    
+    # Forsøk 2: Hvis N/A, sjekk om det ligger i User Summary (ofte mer stabilt)
+    if hrv_val == "N/A" or hrv_val is None:
+        print("Fant ikke HRV i standard-feltet, sjekker reserveløsning...")
+        if 'hrvStatus' in user_summary:
+            hrv_val = user_summary['hrvStatus']
+        elif 'totalAverageHRV' in user_summary:
+             hrv_val = user_summary['totalAverageHRV']
+
+    # Fiks format hvis det er None
+    if hrv_val is None: hrv_val = "N/A"
 
     sleep_val = "N/A"
     if 'dailySleepDTO' in sleep_data:
@@ -97,10 +119,9 @@ def main():
     else:
         act_text = "Ingen trening registrert."
 
-    # --- HER LAGES TEKSTEN DU VIL KOPIERE ---
+    # --- GENERER TEKST ---
     prompt_for_chat = f"""
 Hei Gemini! Her er dagens tall fra Garmin ({today_str}).
-Kan du analysere dette for meg?
 
 Helse:
 - Hvilepuls: {resting_hr}
@@ -112,22 +133,21 @@ Trening:
 {act_text}
     """
     
-    # 1. Lagre teksten til en fil du kan kopiere fra
+    # Lagre til fil
     with open("til_chat.txt", "w", encoding="utf-8") as f:
         f.write(prompt_for_chat)
-    print("✅ Lagret 'til_chat.txt' - klar for klipp og lim!")
+    print("✅ Lagret 'til_chat.txt'")
 
-    # 2. (Valgfritt) Kjør analysen automatisk også, hvis API-nøkkel finnes
+    # Send til Gemini (hvis nøkkel finnes)
     if model:
         try:
-            print("Kjører også automatisk analyse...")
-            response = model.generate_content(prompt_for_chat + "\nGi en kort oppsummering.")
+            print("Kjører Gemini analyse...")
+            response = model.generate_content(prompt_for_chat + "\nGi en kort analyse.")
             with open("min_treningslogg.md", "a", encoding="utf-8") as f:
                 f.write(f"\n\n## {today_str}\n{response.text}\n")
             print("✅ Treningslogg oppdatert.")
         except Exception as e:
-            print(f"Kunne ikke kjøre auto-analyse: {e}")
+            print(f"Gemini feilet: {e}")
 
 if __name__ == "__main__":
     main()
-
