@@ -1,7 +1,6 @@
 import os
 import sys
 import datetime
-from datetime import timedelta
 from pathlib import Path
 from garminconnect import Garmin
 
@@ -26,8 +25,14 @@ if not GARMIN_EMAIL or not GARMIN_PASSWORD:
     print("Mangler brukernavn/passord.")
     sys.exit(1)
 
+def format_duration(seconds):
+    if not seconds: return "0m"
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h}t {m}m" if h > 0 else f"{m}m"
+
 def main():
-    print("Logger inn på Garmin...")
+    print(f"Logger inn på Garmin...")
     try:
         client = Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
         client.login()
@@ -40,52 +45,44 @@ def main():
     print(f"Henter data for {today_str}...")
 
     # --- HENT DATA ---
-    user_profile = client.get_user_profile()
-    body_comp = client.get_body_composition(today_str)
-    training_status = client.get_training_status(today_str)
-    stats = client.get_stats(today_str)
-    hrv_data = client.get_hrv_data(today_str)
-    activities = client.get_activities_by_date(today_str, today_str, "")
+    try: user_profile = client.get_user_profile()
+    except: user_profile = {}
+    
+    try: body_comp = client.get_body_composition(today_str)
+    except: body_comp = {}
+    
+    try: training_status = client.get_training_status(today_str)
+    except: training_status = {}
+    
+    try: stats = client.get_stats(today_str)
+    except: stats = {}
+    
+    try: hrv_data = client.get_hrv_data(today_str)
+    except: hrv_data = {}
+    
+    try: activities = client.get_activities_by_date(today_str, today_str, "")
+    except: activities = []
 
     # --- PARSING ---
 
-    # 1. ENDURANCE SCORE (NY!)
-    endurance_score = "N/A"
-    try:
-        # Endurance Score har sitt eget endepunkt. Vi sjekker dagens dato.
-        # Hvis biblioteket er for gammelt, vil dette feile (derfor try/except)
-        es_data = client.get_endurance_score(today_str)
-        if es_data and 'score' in es_data:
-            endurance_score = es_data['score']
-        else:
-            # Hvis tomt for i dag, sjekk i går (oppdateres ofte etter trening)
-            yesterday = (today - timedelta(days=1)).isoformat()
-            es_data = client.get_endurance_score(yesterday)
-            if es_data and 'score' in es_data:
-                endurance_score = es_data['score']
-    except AttributeError:
-        print("Advarsel: 'garminconnect' biblioteket ditt støtter kanskje ikke Endurance Score enda. Prøv 'pip install --upgrade garminconnect'")
-    except Exception:
-        pass # Ignorerer hvis data ikke finnes
-
-    # 2. VEKT & FETT (Fra Body Composition)
+    # 1. VEKT & FETT (Fra Body Composition -> dateWeightList)
     weight_val = "N/A"
     body_fat = "N/A"
     
+    # Sjekk dagens innveiing (med fettprosent)
     if body_comp and 'dateWeightList' in body_comp and body_comp['dateWeightList']:
-        latest_measure = body_comp['dateWeightList'][0]
-        if 'weight' in latest_measure:
-            w = latest_measure['weight']
-            weight_val = f"{w / 1000:.1f} kg"
-        if 'bodyFat' in latest_measure:
-            body_fat = f"{latest_measure['bodyFat']}%"
+        latest = body_comp['dateWeightList'][0]
+        if 'weight' in latest:
+            weight_val = f"{latest['weight'] / 1000:.1f} kg"
+        if 'bodyFat' in latest:
+            body_fat = f"{latest['bodyFat']:.1f}%"
             
-    # Fallback for vekt: User Profile
+    # Fallback vekt fra profil (hvis ingen veiing i dag)
     if weight_val == "N/A" and user_profile:
         w = user_profile.get('userData', {}).get('weight')
         if w: weight_val = f"{w / 1000:.1f} kg"
 
-    # 3. TRAINING LOAD (Avansert søk i JSON-struktur)
+    # 2. TRAINING LOAD (Fra Training Status -> Device ID -> acuteTrainingLoadDTO)
     acute_load = "N/A"
     chronic_load = "N/A"
     load_ratio = "N/A"
@@ -94,7 +91,7 @@ def main():
         recent_status = training_status.get('mostRecentTrainingStatus', {})
         device_data_map = recent_status.get('latestTrainingStatusData', {})
         
-        # Looper gjennom enheter for å finne data uavhengig av ID
+        # Finn data uavhengig av klokkens ID
         for device_id, data in device_data_map.items():
             if 'acuteTrainingLoadDTO' in data:
                 load_dto = data['acuteTrainingLoadDTO']
@@ -103,7 +100,7 @@ def main():
                 load_ratio = load_dto.get('dailyAcuteChronicWorkloadRatio', "N/A")
                 break
 
-    # 4. VO2 MAX
+    # 3. VO2 MAX
     vo2_run = "N/A"
     vo2_cycle = "N/A"
     if user_profile and 'userData' in user_profile:
@@ -111,30 +108,29 @@ def main():
         vo2_run = u_data.get('vo2MaxRunning', "N/A")
         vo2_cycle = u_data.get('vo2MaxCycling', "N/A")
 
-    # 5. HRV & HELSE
+    # 4. HELSE (HRV / PULS)
     hrv_text = "N/A"
     if hrv_data and 'hrvSummary' in hrv_data:
         s = hrv_data['hrvSummary']
-        hrv_text = f"Siste: {s.get('lastNightAvg')} ms | Status: {s.get('status')}"
+        hrv_text = (f"Siste natt: {s.get('lastNightAvg')} ms | "
+                    f"Ukesnitt: {s.get('weeklyAvg')} ms | "
+                    f"Status: {s.get('status')}")
     
     resting_hr = stats.get('restingHeartRate', "N/A")
     stress = stats.get('averageStressLevel', "N/A")
 
-    # 6. AKTIVITETER
+    # 5. AKTIVITETER
     act_text = ""
     if activities:
         for act in activities:
             name = act.get('activityName', 'Aktivitet')
-            dur_sec = act.get('duration', 0)
-            m, s = divmod(int(dur_sec), 60)
-            h, m = divmod(m, 60)
-            dur_str = f"{h}t {m}m" if h > 0 else f"{m}m"
+            dur = format_duration(act.get('duration', 0))
             load = act.get('trainingLoad', 'N/A')
-            act_text += f"- {name}: {dur_str} (Load: {load})\n"
+            act_text += f"- {name}: {dur} | Load: {load}\n"
     else:
         act_text = "Ingen trening i dag."
 
-    # --- GENERER RAPPORT ---
+    # --- GENERER FIL ---
     prompt = f"""
 Hei Gemini! Her er dagens tall ({today_str}).
 
@@ -145,10 +141,9 @@ Kropp & Helse:
 - Stress: {stress}
 - HRV: {hrv_text}
 
-Ytelse:
-- Endurance Score: {endurance_score}
-- VO2 Max: Løp {vo2_run} / Sykkel {vo2_cycle}
-- FTP: (Autodetect)
+Ytelse (VO2 Max):
+- Løp: {vo2_run}
+- Sykkel: {vo2_cycle}
 
 Belastning (Training Status):
 - Akutt Load (7 dager): {acute_load}
@@ -158,7 +153,7 @@ Belastning (Training Status):
 Dagens Økter:
 {act_text}
 
-Gi meg en kort vurdering av belastning vs. restitusjon.
+Gi en kort analyse av dagens status.
     """
 
     with open("til_chat.txt", "w", encoding="utf-8") as f:
@@ -167,10 +162,10 @@ Gi meg en kort vurdering av belastning vs. restitusjon.
     print("-" * 40)
     print(f"✅ SUKSESS!")
     print(f"   Vekt: {weight_val} | Fett: {body_fat}")
-    print(f"   Load: {acute_load} / {chronic_load}")
-    print(f"   Endurance Score: {endurance_score}")
+    print(f"   Load: {acute_load} / {chronic_load} (Ratio: {load_ratio})")
+    print(f"   VO2:  {vo2_run}")
     print("-" * 40)
-    print("Filen 'til_chat.txt' er klar.")
+    print("Filen 'til_chat.txt' er oppdatert.")
 
 if __name__ == "__main__":
     main()
