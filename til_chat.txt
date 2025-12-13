@@ -1,18 +1,30 @@
 
-Hei Gemini! Her er dagens tall fra Garmin (2025-12-13).
+Hei Gemini! Her er en fullstendig statusrapport fra Garmin (2025-12-13).
 
-Helse:
+Fysiometri & Helse:
+- Vekt: N/A
+- Fettprosent: N/A
 - Hvilepuls: 50
 - Stressnivå: 32
-- Søvnvarighet: 8t 11m
-
-HRV Data:
+- HRV Status:
 Siste natt: 51 ms
-- Ukesnitt (7 dager): 55 ms
-- Baseline: 57-76 ms
+- Ukesnitt: 55 ms (Baseline: 57-76)
 - 5 min maks: 79 ms
 - Status: UNBALANCED
 
-Trening:
-Ingen trening registrert.
+Ytelse & Kapasitet:
+- VO2 Max (Løp): N/A
+- VO2 Max (Sykkel): N/A
+- Cycling FTP: N/A W
+- Endurance Score: N/A
+
+Training Load (Belastning):
+- Akutt Load (7 dager): N/A
+- Kronisk Load (4 uker): N/A
+- Load Ratio: N/A
+
+Dagens Økter:
+Ingen trening registrert i dag.
+
+Ta hensyn til acute/chronic load ratio og HRV når du analyserer totalbelastningen.
     
