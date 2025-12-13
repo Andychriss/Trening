@@ -1,24 +1,25 @@
 
-Hei Gemini! Data fra Garmin (2025-12-13).
+Hei Gemini! Her er dagens tall (2025-12-13).
 
-Kropp:
+Kropp & Helse:
 - Vekt: 80.8 kg
-- Fettprosent: N/A
+- Fettprosent: 19.1%
 - Hvilepuls: 50
 - Stress: 33
-- HRV: Siste natt: 51 ms | Ukesnitt: 55 ms | Status: UNBALANCED
+- HRV: Siste: 51 ms | Status: UNBALANCED
 
 Ytelse:
-- VO2 Max Løp: 56.0
-- VO2 Max Sykkel: 56.0
-- FTP: N/A W
 - Endurance Score: N/A
+- VO2 Max: Løp 56.0 / Sykkel 56.0
+- FTP: (Autodetect)
 
-Belastning (Load):
-- Akutt (7-dager): N/A
-- Kronisk (4-uker): N/A
-- Load Ratio: None
+Belastning (Training Status):
+- Akutt Load (7 dager): 324
+- Kronisk Load (4 uker): 358
+- Load Ratio: 0.9
 
 Dagens Økter:
-Ingen trening registrert i dag.
+Ingen trening i dag.
+
+Gi meg en kort vurdering av belastning vs. restitusjon.
     
