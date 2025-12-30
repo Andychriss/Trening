@@ -1,24 +1,24 @@
 
-Hei Gemini! Her er dagens tall (2025-12-29).
+Hei Gemini! Her er dagens tall (2025-12-30).
 
 Kropp & Helse:
-- Vekt: 84.4 kg
+- Vekt: 83.6 kg
 - Fettprosent: 19.8%
-- Hvilepuls: 50
-- Stress: 25
-- HRV: Siste natt: 60 ms | Ukesnitt: 51 ms | Status: UNBALANCED
+- Hvilepuls: 47
+- Stress: 23
+- HRV: Siste natt: 59 ms | Ukesnitt: 56 ms | Status: BALANCED
 
 Ytelse (VO2 Max):
 - Løp: 56.0
 - Sykkel: 55.0
 
 Belastning (Training Status):
-- Akutt Load (7 dager): 507
-- Kronisk Load (4 uker): 347
+- Akutt Load (7 dager): 501
+- Kronisk Load (4 uker): 356
 - Load Ratio: 1.4
 
 Dagens Økter:
-- v12:00/2:00r...7 SkiErg: 59m | Load: N/A
+- Zwift - Volcano Circuit in Watopia: 1t 0m | Load: N/A
 
 
 Gi en kort analyse av dagens status.
