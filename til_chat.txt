@@ -1,24 +1,24 @@
 
-Hei Gemini! Her er dagens tall (2026-09-14).
+Hei Gemini! Her er dagens tall (2026-09-15).
 
 Kropp & Helse:
-- Vekt: 92.1 kg
-- Fettprosent: 23.6%
-- Hvilepuls: 51
-- Stress: 38
-- HRV: Siste natt: 56 ms | Ukesnitt: 57 ms | Status: BALANCED
+- Vekt: 91.7 kg
+- Fettprosent: 23.4%
+- Hvilepuls: 52
+- Stress: 42
+- HRV: Siste natt: 54 ms | Ukesnitt: 55 ms | Status: BALANCED
 
 Ytelse (VO2 Max):
 - Løp: 52.0
 - Sykkel: 52.0
 
 Belastning (Training Status):
-- Akutt Load (7 dager): 236
+- Akutt Load (7 dager): 263
 - Kronisk Load (4 uker): 219
-- Load Ratio: 1.0
+- Load Ratio: 1.1
 
 Dagens Økter:
-- Oslo Road Cycling: 41m | Load: N/A
+- Styrke: 1t 1m | Load: N/A
 
 
 Gi en kort analyse av dagens status.
